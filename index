@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, x5-fullscreen=true, mpfullscreen=true">
+    <title>Cardboard VR Real - Tela Dividida Forçada</title>
+    
+    <!-- Scripts Principais: A-Frame e Física -->
+    <script src="https://aframe.io"></script>
+    <script src="https://jsdelivr.net"></script>
+    
+    <!-- Scripts de Multiplayer -->
+    <script src="https://cloudflare.com"></script>
+    <script src="https://unpkg.com"></script>
+
+    <!-- Bibliotecas da Google para Rastrear Mãos/Articulações via Câmera do Celular -->
+    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+
+    <style>
+        /* Feed da webcam invisível rodando ao fundo */
+        #webcam {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+
+    <script>
+        // Movimentação analógica do controle Shinecon adaptada para Cardboard
+        AFRAME.registerComponent('shinecon-movement', {
+            tick: function () {
+                const gamepads = navigator.getGamepads();
+                for (let i = 0; i < gamepads.length; i++) {
+                    const gp = gamepads[i];
+                    if (gp && (Math.abs(gp.axes[0]) > 0.1 || Math.abs(gp.axes[1]) > 0.1)) {
+                        let rig = document.getElementById('playerRig');
+                        let head = document.getElementById('cardboard-head');
+                        let rotation = head.getAttribute('rotation');
+                        let position = rig.getAttribute('position');
+
+                        let angle = (rotation.y) * Math.PI / 180;
+                        let speed = 0.06;
+
+                        position.x += (gp.axes[0] * Math.cos(angle) + gp.axes[1] * Math.sin(angle)) * speed;
+                        position.z += (gp.axes[1] * Math.cos(angle) - gp.axes[0] * Math.sin(angle)) * speed;
+                        
+                        rig.setAttribute('position', position);
+                    }
+                }
+            }
+        });
+
+        // Lógica do Minigame (Soma pontos ao tocar ou fixar o olhar)
+        AFRAME.registerComponent('minigame-target', {
+            init: function () {
+                const coletar = () => {
+                    if (this.el.getAttribute('visible') !== false) {
+                        this.el.setAttribute('visible', 'false');
+                        let placar = document.getElementById('scoreText');
+                        let pontos = parseInt(placar.getAttribute('value').split(': ')[1]) + 1;
+                        placar.setAttribute('value', 'Placar: ' + pontos);
+                    }
+                };
+                this.el.addEventListener('hitstart', coletar);
+                this.el.addEventListener('click', coletar);
+            }
+        });
+
+        // Inicializa IA do MediaPipe para as articulações das mãos via Câmera
+        window.addEventListener('DOMContentLoaded', () => {
+            const videoElement = document.getElementById('webcam');
+            const hands = new Hands({
+                locateFile: (file) => `https://jsdelivr.net{file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults((results) => {
+                if (results.multiHandLandmarks) {
+                    results.multiHandLandmarks.forEach((landmarks, index) => {
+                        let pulso = landmarks[0]; 
+                        let maoVirtual = document.getElementById(index === 0 ? 'leftHand' : 'rightHand');
+                        
+                        if (maoVirtual) {
+                            let posX = (pulso.x - 0.5) * -2.5;
+                            let posY = (pulso.y - 0.5) * -2.5 + 1.4;
+                            let posZ = (pulso.z) * -2 - 1.2;
+                            
+                            maoVirtual.setAttribute('position', `${posX} ${posY} ${posZ}`);
+                            maoVirtual.setAttribute('visible', 'true');
+                        }
+                    });
+                }
+            });
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => { await hands.send({image: videoElement}); },
+                width: 640,
+                height: 480
+            });
+            
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then((stream) => {
+                    videoElement.srcObject = stream;
+                    camera.start();
+                }).catch(err => console.log("Permita a câmera para ver suas mãos no VR."));
+        });
+    </script>
+</head>
+<body>
+
+    <video id="webcam" autoplay playsinline></video>
+
+    <!-- ATENÇÃO: vr-mode-ui força a compatibilidade com o Cardboard -->
+    <a-scene physics="debug: false" 
+             vr-mode-ui="cardboardModeEnabled: true"
+             networked-scene="
+                room: sala-cardboard-real;
+                debug: false;
+                adapter: wseasyrtc;
+                serverURL: https://glitch.me;
+             ">
+        
+        <a-assets>
+            <template id="avatar-template">
+                
+                    <a-sphere class="head" color="#E94560" radius="0.25"></a-sphere>
+                    <a-box class="body" color="#0F3460" width="0.4" height="0.6" depth="0.2" position="0 -0.5 0"></a-box>
+                
+            </template>
+        </a-assets>
+
+        <!-- Mundo Virtual -->
+        <a-sky color="#1A1A2E"></a-sky>
+        <a-plane position="0 0 0" rotation="-90 0 0" width="50" height="50" color="#16213E" static-body></a-plane>
+
+        <!-- Placar -->
+        <a-text id="scoreText" value="Placar: 0" position="0 2.5 -2.5" align="center" color="#FFF" width="5"></a-text>
+
+        <!-- Alvos do Minigame -->
+        <a-box minigame-target class="target" position="-1 1.4 -2" width="0.25" height="0.25" depth="0.25" color="#E94560" dynamic-body></a-box>
+        <a-box minigame-target class="target" position="1 1.6 -2.5" width="0.2" height="0.2" depth="0.2" color="#FFD200" dynamic-body></a-box>
+
+        <!-- PLAYER RIG (Giroscópio + Mãos + Controle) -->
+        
+            
+            <!-- Câmera com Giroscópio do Cardboard habilitado -->
+            
+                <a-cursor color="#FFD200" radius="0.02" fuse="true" fuse-timeout="1200"></a-cursor>
+            
+
+            <!-- Articulações das Mãos Virtuais (Renderizadas via processamento de câmera) -->
+            <a-sphere id="leftHand" class="hand-joint" radius="0.08" color="#00FFF0" visible="false" static-body></a-sphere>
+            <a-sphere id="rightHand" class="hand-joint" radius="0.08" color="#00FFF0" visible="false" static-body></a-sphere>
+
+        
+
+        <!-- Iluminação -->
+        
+        
+
+    </a-scene>
+
+</body>
+</html>

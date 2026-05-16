@@ -1,2 +1,0 @@
-# VRMeta
-# venha se divertir!
